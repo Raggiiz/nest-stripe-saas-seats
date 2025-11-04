@@ -14,11 +14,11 @@ export class OrganizationsController {
     // req.firebaseUser vem do guard (token verificado pelo Firebase)
     const firebaseUser = req.firebaseUser as { uid: string; email?: string; email_verified?: boolean };
 
-    return this.orgS.createOrganizationForUser({
-      googleId: firebaseUser.uid,
-      emailVerified: !!firebaseUser.email_verified,
+    return this.orgS.createOrganizationForUser(
+      firebaseUser.uid,
+      !!firebaseUser.email_verified,
       dto,
-    });
+    );
   }
 
   @UseGuards(FirebaseAuthGuard)
@@ -31,7 +31,6 @@ export class OrganizationsController {
 
   @Get('exists/:orgId')
   async checkIfOrgExists(@Param('orgId') id: string) {
-    console.log(id)
     return this.orgS.checkIfExists(id)
   }
 

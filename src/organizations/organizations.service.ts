@@ -3,28 +3,30 @@ import { PrismaService } from '../prisma/prisma.service';
 import * as admin from 'firebase-admin';
 import { Plan, Role } from '@prisma/client';
 import { CreateOrganizationDto, PlanDto } from './create-organization.dto';
+import { BillingService } from 'src/billing/stripe.service';
 
 @Injectable()
 export class OrganizationsService {
   constructor(
     private readonly prisma: PrismaService,
-  ) {}
+    private stripeS: BillingService
+  ) { }
 
   private seatLimitForPlan(plan: Plan | PlanDto) {
     switch (plan) {
       case 'ADVANCED': return 6;
-      case 'PREMIUM':  return 9;
+      case 'PREMIUM': return 9;
       case 'BASIC':
-      default:         return 3;
+      default: return 3;
     }
   }
 
-  async createOrganizationForUser(params: {
-    googleId: string;
-    emailVerified: boolean;
-    dto: CreateOrganizationDto;
-  }) {
-    const { googleId, emailVerified, dto } = params;
+  async createOrganizationForUser(
+    googleId: string,
+    emailVerified: boolean,
+    dto: CreateOrganizationDto
+  ) {
+
     if (!emailVerified) {
       throw new ForbiddenException('email-not-verified');
     }
@@ -61,12 +63,16 @@ export class OrganizationsService {
         },
       });
 
+
+
       return [org, updatedUser] as const;
     });
 
+    const stripeSession = await this.stripeS.createCheckoutSessionForUser(user.email, dto.plan, org)
+
     // 4) seta claims no Firebase (role ADMIN + orgId)
     //    obs: preferimos usar claims como autoridade para autorização
-    if(user.googleId) {
+    if (user.googleId) {
       const userRecord = await admin.auth().getUser(user.googleId);
       const currentCustomClaims = userRecord.customClaims || {};
 
@@ -90,35 +96,38 @@ export class OrganizationsService {
         role: updatedUser.role, // ADMIN
         organizationId: updatedUser.organizationId,
       },
-      // dica para o front: chame auth.refreshClaims() após receber este 200
+      session: stripeSession,
+      // auth.refreshClaims() após receber este 200
       claimsUpdated: true,
     };
   }
 
-  async getMyOrg (firebaseUser) {
-    const user = await this.prisma.user.findUnique({ 
-      where: { 
-        googleId: firebaseUser.uid 
-      } ,
+  async getMyOrg(firebaseUser) {
+    const user = await this.prisma.user.findUnique({
+      where: {
+        googleId: firebaseUser.uid
+      },
       include: {
         organization: {
-        select: {
-          id: true,
-          name: true,
-          plan: true,
-          seatLimit: true,
-          users: {
-            select: {
-              id: true,
-              email: true,
-              name: true,
-              role: true,
-              picture: true,
+          select: {
+            id: true,
+            name: true,
+            plan: true,
+            seatLimit: true,
+            stripeCustomerId: true,
+            stripeSubscriptionId: true,
+            users: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                picture: true,
+              },
+              orderBy: { name: 'asc' }
             },
-            orderBy: { name: 'asc' }
           },
         },
-      },
       }
     });
 
@@ -126,14 +135,17 @@ export class OrganizationsService {
       throw new BadRequestException('user-not-provisioned');
     }
 
-    if(user.organization?.id !== firebaseUser.org_id) {
+    if (user.organization?.id !== firebaseUser.org_id) {
       throw new BadRequestException('organization-does-not-match');
     }
-    return user.organization
+
+    const pm = await this.stripeS.getPaymentInfoForOrg(user.organization)
+
+    return { ...user.organization, paymentInfo: pm }
   }
 
   async checkIfExists(id: string) {
-    const res = await this.prisma.organization.findFirst({where: {id}})
+    const res = await this.prisma.organization.findFirst({ where: { id } })
 
     return {
       exists: !!res,
