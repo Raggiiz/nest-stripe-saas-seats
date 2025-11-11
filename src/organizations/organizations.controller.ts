@@ -18,7 +18,7 @@ export class OrganizationsController {
 
     return this.orgS.createOrganizationForUser(
       firebaseUser.uid,
-      !!firebaseUser.email_verified,
+      // !!firebaseUser.email_verified,
       dto,
     );
   }

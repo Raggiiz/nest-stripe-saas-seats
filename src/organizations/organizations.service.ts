@@ -14,13 +14,13 @@ export class OrganizationsService {
 
   async createOrganizationForUser(
     googleId: string,
-    emailVerified: boolean,
+    // emailVerified: boolean,
     dto: CreateOrganizationDto
   ) {
 
-    if (!emailVerified) {
-      throw new ForbiddenException('email-not-verified');
-    }
+    // if (!emailVerified) {
+    //   throw new ForbiddenException('email-not-verified');
+    // }
 
     // 1) resolve usuário local
     const user = await this.prisma.user.findUnique({ where: { googleId } });

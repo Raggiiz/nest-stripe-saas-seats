@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Role } from "@prisma/client";
 import { PrismaService } from "src/prisma/prisma.service";
 import * as admin from 'firebase-admin';
@@ -8,13 +8,13 @@ export class AuthService {
     constructor(private readonly prisma: PrismaService,) { }
 
     async signup(decoded) {
-        if (!decoded.email || decoded.email_verified === false) {
-            return { error: 'email_not_verified' };
-        }
+        // if (!decoded.email || decoded.email_verified === false) {
+        //     throw new ForbiddenException('email-not-verified');
+        // }
 
         const exists = await this.prisma.user.findUnique({ where: { googleId: decoded.uid } });
         if (exists) {
-            return { error: 'already_exists', userId: exists.id }; // 200 com erro sem criar (ou use 409 se preferir)
+            throw new ConflictException('already_exists')
         }
 
         const user = await this.prisma.user.create({
@@ -33,13 +33,13 @@ export class AuthService {
     }
 
     async acceptInvite(decoded, body) {
-        if (!decoded.email || decoded.email_verified === false) {
-            return { error: 'email_not_verified' };
-        }
+        // if (!decoded.email || decoded.email_verified === false) {
+        //     throw new ForbiddenException('email-not-verified');
+        // }
 
         const exists = await this.prisma.user.findUnique({ where: { googleId: decoded.uid } });
         if (exists) {
-            return { error: 'already_exists', userId: exists.id };
+            throw new ConflictException('already_exists')
         }
 
         // 1) seat limit
