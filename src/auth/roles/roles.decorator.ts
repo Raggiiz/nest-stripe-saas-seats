@@ -1,0 +1,5 @@
+import { SetMetadata } from '@nestjs/common';
+import { Role } from '@prisma/client';
+
+// define o metadata "roles" que o guard vai ler
+export const Roles = (...roles: Role[]) => SetMetadata('roles', roles);

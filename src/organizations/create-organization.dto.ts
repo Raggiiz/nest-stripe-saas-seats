@@ -1,9 +1,12 @@
-import { IsEnum, IsString, MinLength } from 'class-validator';
+import { IsEnum, IsNumber, IsString, MinLength } from 'class-validator';
 
 export enum PlanDto {
-  BASIC = 'BASIC',
-  ADVANCED = 'ADVANCED',
-  PREMIUM = 'PREMIUM',
+  BASIC_MONTH = 'BASIC_MONTH',
+  BASIC_YEAR = 'BASIC_YEAR',
+  ADVANCED_MONTH = 'ADVANCED_MONTH',
+  ADVANCED_YEAR = 'ADVANCED_YEAR',
+  PREMIUM_MONTH = 'PREMIUM_MONTH',
+  PREMIUM_YEAR = 'PREMIUM_YEAR',
 }
 
 export class CreateOrganizationDto {
@@ -13,4 +16,7 @@ export class CreateOrganizationDto {
 
   @IsEnum(PlanDto)
   plan: PlanDto;
+
+  @IsNumber()
+  seats: number
 }

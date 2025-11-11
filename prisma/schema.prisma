@@ -20,9 +20,22 @@ enum Role {
 }
 
 enum Plan {
-  BASIC
-  ADVANCED
-  PREMIUM
+  BASIC_MONTH
+  BASIC_YEAR
+  ADVANCED_MONTH
+  ADVANCED_YEAR
+  PREMIUM_MONTH
+  PREMIUM_YEAR
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  UNPAID
+  CANCELED
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
 }
 
 model Organization {
@@ -30,8 +43,10 @@ model Organization {
   name                String
   stripeCustomerId    String?  @unique
   stripeSubscriptionId String? @unique
-  plan                Plan     @default(BASIC)
-  seatLimit           Int      @default(3)
+  subscriptionStatus  SubscriptionStatus?
+  subscriptionCheckedAt  DateTime?
+  plan                Plan     @default(BASIC_MONTH)
+  seatLimit           Int      @default(1)
   users               User[]
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt

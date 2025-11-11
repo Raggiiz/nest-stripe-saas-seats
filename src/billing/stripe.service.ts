@@ -1,8 +1,7 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import Stripe from 'stripe';
 import { PrismaService } from '../prisma/prisma.service';
-import { Plan } from '@prisma/client';
-import { Organization } from 'generated/prisma';
+import { Organization, Plan } from '@prisma/client';
 
 @Injectable()
 export class BillingService {
@@ -12,24 +11,19 @@ export class BillingService {
 
   private priceId(plan: Plan) {
     switch (plan) {
-      case 'ADVANCED': return process.env.STRIPE_PRICE_ADVANCED!;
-      case 'PREMIUM': return process.env.STRIPE_PRICE_PREMIUM!;
-      default: return process.env.STRIPE_PRICE_BASIC!;
+      case 'ADVANCED_MONTH': return process.env.STRIPE_PRICE_ADVANCED_MONTH!;
+      case 'ADVANCED_YEAR': return process.env.STRIPE_PRICE_ADVANCED_YEAR!;
+      case 'PREMIUM_MONTH': return process.env.STRIPE_PRICE_PREMIUM_MONTH!;
+      case 'PREMIUM_YEAR': return process.env.STRIPE_PRICE_PREMIUM_YEAR!;
+      case 'BASIC_YEAR': return process.env.STRIPE_PRICE_BASIC_YEAR!;
+      default: return process.env.STRIPE_PRICE_BASIC_MONTH!;
     }
   }
 
-  private seatLimit(plan: Plan) {
-    switch (plan) {
-      case 'ADVANCED': return 6;
-      case 'PREMIUM': return 9;
-      default: return 3;
-    }
-  }
 
   /** Cria (ou reaproveita) Customer, cria org se não houver, e retorna a URL da Checkout Session */
   async createCheckoutSessionForUser(
     email: string,
-    plan: Plan,
     org: Organization
   ) {
 
@@ -51,7 +45,7 @@ export class BillingService {
     const session = await this.stripe.checkout.sessions.create({
       mode: 'subscription',
       customer: customerId,
-      line_items: [{ price: this.priceId(plan), quantity: 1 }],
+      line_items: [{ price: this.priceId(org.plan), quantity: org.seatLimit }],
       success_url: `${process.env.FRONTEND_URL}/?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.FRONTEND_URL}/?session_id=canceled`,
       allow_promotion_codes: true,
@@ -77,16 +71,21 @@ export class BillingService {
 
     // 1) Descobrir o price (plano)
     const priceId = subscription.items.data[0]?.price.id;
-    let plan: Plan = 'BASIC';
-    if (priceId === process.env.STRIPE_PRICE_ADVANCED) plan = 'ADVANCED';
-    else if (priceId === process.env.STRIPE_PRICE_PREMIUM) plan = 'PREMIUM';
+    let plan: Plan = 'BASIC_MONTH';
+    if (priceId === this.priceId('BASIC_YEAR')) plan = 'BASIC_YEAR';
+    else if (priceId === this.priceId('ADVANCED_MONTH')) plan = 'ADVANCED_MONTH';
+    else if (priceId === this.priceId('ADVANCED_YEAR')) plan = 'ADVANCED_YEAR';
+    else if (priceId === this.priceId('PREMIUM_MONTH')) plan = 'PREMIUM_MONTH';
+    else if (priceId === this.priceId('PREMIUM_YEAR')) plan = 'PREMIUM_YEAR';
 
     // 2) orgId veio no metadata do customer na criação
     const orgId = (customer.metadata as any)?.orgId;
     if (!orgId) throw new BadRequestException('org-metadata-missing');
 
+    // 3) Descobrir seats
+    const seatLimit = subscription.items[0]?.quantity
+
     // 3) Persistir no banco
-    const seatLimit = this.seatLimit(plan);
     const updated = await this.prisma.organization.update({
       where: { id: orgId },
       data: {
@@ -166,7 +165,7 @@ export class BillingService {
     return { url: session.url };
   }
 
-  async updatePlanForUser(googleId: string, newPlan: Plan) {
+  async updateSubscriptionForOrg(googleId: string, newPlan?: Plan, seats?: number) {
     const user = await this.prisma.user.findUnique({
       where: { googleId },
       include: {
@@ -198,10 +197,6 @@ export class BillingService {
       throw new BadRequestException('organization-has-no-subscription');
     }
 
-    if (org.users.length >= this.seatLimit(newPlan)) {
-      throw new ForbiddenException('seat-limit-reached');
-    }
-
     // Recupera a assinatura atual
     const subscription = await this.stripe.subscriptions.retrieve(org.stripeSubscriptionId);
 
@@ -211,21 +206,35 @@ export class BillingService {
 
     const currentItem = subscription.items.data[0];
 
+    // Valida seats (quantity) se vier
+    let nextQuantity = seats ?? currentItem.quantity ?? 1;
+    if (nextQuantity < 1) throw new BadRequestException('quantity-min-1');
+
+    // Novo plano
+    const newPriceId = newPlan ? this.priceId(newPlan) : undefined;
+
+    const activeUsers = await this.prisma.user.count({ where: { organizationId: org.id } });
+    if (nextQuantity < activeUsers) {
+      throw new BadRequestException(`quantity-too-low (current users: ${activeUsers})`);
+    }
+
     // Atualiza o price (Stripe cuida da proration automaticamente)
     const updatedSub = await this.stripe.subscriptions.update(org.stripeSubscriptionId, {
       items: [{
         id: currentItem.id,
-        price: this.priceId(newPlan),
+        ...(newPriceId ? { price: newPriceId } : {}),
+        ...(nextQuantity ? { quantity: nextQuantity } : {}),
       }],
       proration_behavior: 'create_prorations', // gera crédito/débito proporcional
     });
 
-    // 3️⃣ Atualiza o banco
+    const updatedItem = updatedSub.items.data[0];
+    // Atualiza o banco
     const updatedOrg = await this.prisma.organization.update({
       where: { id: org.id },
       data: {
         plan: newPlan,
-        seatLimit: this.seatLimit(newPlan),
+        seatLimit: updatedItem.quantity ?? nextQuantity,
         stripeSubscriptionId: updatedSub.id
       },
     });

@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Role } from "@prisma/client";
 import { PrismaService } from "src/prisma/prisma.service";
 import * as admin from 'firebase-admin';
@@ -37,7 +37,6 @@ export class AuthService {
             return { error: 'email_not_verified' };
         }
 
-        
         const exists = await this.prisma.user.findUnique({ where: { googleId: decoded.uid } });
         if (exists) {
             return { error: 'already_exists', userId: exists.id };
@@ -66,5 +65,32 @@ export class AuthService {
         await admin.auth().setCustomUserClaims(decoded.uid, { role: 'USER', platform_user_id: user.id, org_id: body.orgId });
 
         return user;
+    }
+
+    async removeUser(requesterId: string, targetUserId: string) {
+        if (requesterId === targetUserId) {
+            throw new BadRequestException('cannot-delete-yourself');
+        }
+
+        const [requester, target] = await Promise.all([
+            this.prisma.user.findUnique({ where: { googleId: requesterId } }),
+            this.prisma.user.findUnique({ where: { id: targetUserId } }),
+        ]);
+
+        if (!target) throw new NotFoundException('user-not-found');
+        if (!requester) throw new ForbiddenException('requester-not-found');
+
+        if (!requester.organizationId || requester.organizationId !== target.organizationId) {
+            throw new ForbiddenException('different-organization');
+        }
+        // Admin não pode remover Admin
+        if (target.role === Role.ADMIN) {
+            throw new ForbiddenException('cannot-delete-admin');
+        }
+
+        await admin.auth().deleteUser(target.googleId as string).catch(() => {/* no-op */});
+        await this.prisma.user.delete({ where: { id: target.id } });
+
+        return { deleted: true }
     }
 }

@@ -12,15 +12,6 @@ export class OrganizationsService {
     private stripeS: BillingService
   ) { }
 
-  private seatLimitForPlan(plan: Plan | PlanDto) {
-    switch (plan) {
-      case 'ADVANCED': return 6;
-      case 'PREMIUM': return 9;
-      case 'BASIC':
-      default: return 3;
-    }
-  }
-
   async createOrganizationForUser(
     googleId: string,
     emailVerified: boolean,
@@ -41,9 +32,7 @@ export class OrganizationsService {
       throw new BadRequestException('user-already-has-organization');
     }
 
-    // 2) normaliza plan
-    // const plan = (dto.plan ?? 'BASIC') as Plan;
-    const seatLimit = this.seatLimitForPlan(dto.plan);
+    if (dto.seats < 1) throw new BadRequestException('quantity-min-1');
 
     // 3) cria org + promove user a ADMIN, tudo em transação
     const [org, updatedUser] = await this.prisma.$transaction(async (tx) => {
@@ -51,7 +40,7 @@ export class OrganizationsService {
         data: {
           name: dto.name,
           plan: dto.plan,
-          seatLimit,
+          seatLimit: dto.seats,
         },
       });
 
@@ -63,12 +52,10 @@ export class OrganizationsService {
         },
       });
 
-
-
       return [org, updatedUser] as const;
     });
 
-    const stripeSession = await this.stripeS.createCheckoutSessionForUser(user.email, dto.plan, org)
+    const stripeSession = await this.stripeS.createCheckoutSessionForUser(user.email, org)
 
     // 4) seta claims no Firebase (role ADMIN + orgId)
     //    obs: preferimos usar claims como autoridade para autorização
